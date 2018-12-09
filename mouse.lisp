@@ -16,6 +16,7 @@
 (import 'alexandria:clamp)
 (import 'alexandria:curry)
 (import 'sdl2-util:with-sdl-thread)
+(import 'sdl2-util:with-initialized-sdl)
 (import 'sdl2-util:rgb)
 (import 'jmutil:clampedp)
 
@@ -192,6 +193,8 @@
     (sdl2:free-rect (gobj-prev-rect o)))
   (setf *game-objects* nil)
   (setf *player* nil)
+  (setf *loaded* nil)
+  (setf *sprites* nil)
   (values))
 
 (defun game-obj-type (obj-type)
@@ -206,7 +209,7 @@
   (not (steppable-directions x y)))
 
 (defun gobj-sprite (obj)
-  "Return image surface corresponding to a game object, loading it from disk if required."
+  "Return image texture corresponding to a game object, loading it from disk if required."
   (let* ((obj-type (gobj-type obj))
          (sprite-type (case obj-type
                         (:cat (if (cat-stuck-p (gobj-x obj)
@@ -223,16 +226,17 @@
               (getf *sprites* sprite-type) texture)))
     sprite))
 
-(defun render-game-object (surf win obj)
-  "Draw game object on the given surface"
-  (declare (ignore win))
+(defun render-game-object (rend obj)
+  "Render game object"
   (let ((sprite (gobj-sprite obj)))
     ;Redraw game objects
-    (sdl2:blit-scaled sprite nil surf (gobj-rect obj))))
+    (sdl2:render-copy rend sprite :dest-rect (gobj-rect obj))))
 
 
 (defvar *last-ticks* 0)
-(defun event-idle (surf win)
+(defun event-idle (win rend)
+  "Called for the :idle event in SDL event loop"
+  (declare (ignore win))
   (bordeaux-threads:with-lock-held (*idle-lock*)
     ; framerate limiter - do nothing until at least 10ms have passed
     #| (if (<= 10 (- (sdl2:get-ticks) *last-ticks*))
@@ -241,12 +245,12 @@
     ; Game timers
     (sdl2-util:do-timers)
     ; Clear buffer
-    (sdl2-util:clear-surface surf)
+    (sdl2:render-clear rend)
     ;Redraw game objects
     (dolist (o *game-objects*)
-      (render-game-object surf win o))
+      (render-game-object rend o))
     ;Draw current game info
-    (sdl2-util:draw-text win surf
+    (sdl2-util:draw-text rend
                          (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
                          0 0
                          255 255 255 255)
@@ -255,14 +259,14 @@
     ;Perform status-specific updates
     (case *game-state*
       (:lost
-        (sdl2-util:draw-text win surf 
+        (sdl2-util:draw-text rend
                              "GAME OVER" 100 100 
                              255 255 255 255))
       (:won
-        (sdl2-util:draw-text win surf
+        (sdl2-util:draw-text rend
                              "YOU WON!" 100 100
                              255 255 255 255)))
-    (sdl2:update-window win)))
+    (sdl2:render-present rend)))
 
 (defmethod catp ((o game-object))
   (eq (gobj-type o) :cat))
@@ -424,6 +428,36 @@
         until (null (game-objects-at x y))
         finally (push (make-game-object :cat x y) *game-objects*)))
 
+(defun load-level (game-data)
+  (bordeaux-threads:with-lock-held (*idle-lock*)
+    (let ((game-size (getf game-data :game-size))
+          (contents  (getf game-data :contents))
+          (num-cats  (getf game-data :num-cats))
+          (bonus-lives (getf game-data :bonus-lives)))
+      (free-game-objects)
+      (setf *loaded* :in-progress
+            *game-objects* nil
+            *player* nil
+            *game-size* game-size
+            *remaining-cats* (or num-cats 0)
+            *lives* (+ *lives* (or bonus-lives 0)))
+      (loop for i = 0 then (1+ i)
+            for e in contents
+            do (let ((x (mod i game-size))
+                     (y (truncate i game-size))
+                     (k (alexandria:make-keyword e)))
+                 (unless (eql k :*) ; Asterisks denote blank space, no objects.
+                   (case (alexandria:make-keyword e)
+                     (:b (push (make-game-object :box x y) *game-objects*))
+                     (:c (push (make-game-object :cat x y) *game-objects*))
+                     (:x (push (make-game-object :brick x y) *game-objects*))
+                     (:m (setf *player* (make-game-object :player x y))
+                         (push *player* *game-objects*))
+                     (:player (setf *player* (make-game-object :player x y)) ; synonym
+                              (push *player* *game-objects*))
+                     ; Default case - assume a valid game object was named.
+                     (t (push (make-game-object (alexandria:make-keyword e) x y) *game-objects*))))))
+      (setf *loaded* t))))
 
 (defun next-level ()
   "Load the next level, or otherwise act to progress the game"
@@ -477,7 +511,9 @@
 (defun run-game ()
   (finish-output)
   (setf *last-ticks* (sdl2:get-ticks))
-  (with-sdl-thread (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
+  (with-initialized-sdl
+        (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
+    (setf *renderer* rend)
     (sdl2-image:init '(:png)) ; Enable loading of images for tiles
     (let ()
       ; Default minimum data that satisfies assumptions later in code.
@@ -490,7 +526,7 @@
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
         (:idle () 
-         (event-idle surf win))
+         (event-idle win rend))
         (:quit ()
          t)
         (:keyup (:keysym keysym) 
@@ -502,54 +538,13 @@
         (:startgame ()
          (event-startgame))))))
 
-#|
-(defvar *mywin*)
-(defvar *mysurf*)
-(sdl2-util:with-sdl-thread (:title "Testing memory" :h 200 :w 200)
-  (setf *mywin* win)
-  (setf *mysurf* surf)
-  (sdl2:with-event-loop (:method :poll)
-    (:idle ())
-    (:quit () t)))
-|#
 
-
-
-
-(defun load-level (game-data)
-  (bordeaux-threads:with-lock-held (*idle-lock*)
-    (let ((game-size (getf game-data :game-size))
-          (contents  (getf game-data :contents))
-          (num-cats  (getf game-data :num-cats))
-          (bonus-lives (getf game-data :bonus-lives)))
-      (free-game-objects)
-      (setf *loaded* :in-progress
-            *game-objects* nil
-            *player* nil
-            *game-size* game-size
-            *remaining-cats* (or num-cats 0)
-            *lives* (+ *lives* (or bonus-lives 0)))
-      (loop for i = 0 then (1+ i)
-            for e in contents
-            do (let ((x (mod i game-size))
-                     (y (truncate i game-size))
-                     (k (alexandria:make-keyword e)))
-                 (unless (eql k :*) ; Asterisks denote blank space, no objects.
-                   (case (alexandria:make-keyword e)
-                     (:b (push (make-game-object :box x y) *game-objects*))
-                     (:c (push (make-game-object :cat x y) *game-objects*))
-                     (:x (push (make-game-object :brick x y) *game-objects*))
-                     (:m (setf *player* (make-game-object :player x y))
-                         (push *player* *game-objects*))
-                     (:player (setf *player* (make-game-object :player x y)) ; synonym
-                              (push *player* *game-objects*))
-                     ; Default case - assume a valid game object was named.
-                     (t (push (make-game-object (alexandria:make-keyword e) x y) *game-objects*))))))
-      (setf *loaded* t))))
 
 (defun play-level (level-data)
+  "Plays a level defined by level-data"
+  (free-game-objects)
   (load-level level-data)
-  (sdl2:push-user-event :startgame))
+  (run-game))
 
 (defparameter *example-level-1*
   '(:game-size 10
@@ -631,15 +626,16 @@
   (setf *game-size* size)
   (let ((result nil))
     (sdl2-util:with-initialized-sdl (:title "Mouse Game" :h *window-size* :w *window-size*)
+      (setf *renderer* rend)
       (sdl2-image:init '(:png)) ; Enable loading of images for tiles
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
         (:idle () 
          ; Render game objects on a blank canvas
-         (sdl2-util:clear-surface surf)
+         (sdl2:render-clear rend)
          (dolist (obj *game-objects*)
-           (render-game-object surf win obj))
-         (sdl2:update-window win))
+           (render-game-object rend obj))
+         (sdl2:render-present rend))
         (:quit () 
           (setf result *game-objects*)
           t)
@@ -679,7 +675,9 @@
   (event-startgame))
 
 (defun play-levelset (levelset)
-  (event-startgame)
+  (free-game-objects)
   (load-level (first levelset))
   (setf *levels* (rest levelset))
-  (run-game))
+  (run-game)
+  (event-startgame))
+
