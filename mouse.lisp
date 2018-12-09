@@ -1,3 +1,7 @@
+; Resources stored in script folder, not sure how to handle this better.
+(sb-posix:chdir #P"/home/jakykong/lisp/mouse")
+
+; Dependencies
 (ql:quickload '(:sdl2 :sdl2-ttf :bordeaux-threads :alexandria :sdl2-util :jmutil :sdl2-util :sdl2-image))
 
 (require :sdl2)
@@ -31,6 +35,8 @@
   "Current game score")
 (defvar *remaining-cats* 0
   "Number of cats before next level")
+(defvar *game-state* nil
+  "Tracks the current play state of the game overall. NIL = not started, WON/LOST as expected.")
 
 (defvar *sprites* nil
   "Table of sprites for rendering purposes. Currently a plist.")
@@ -40,6 +46,8 @@
    most 10 spaces before colliding with a wall.")
 (defparameter *window-size* 800
   "Size of SDL window the game will be played in, integer in pixels.")
+(defparameter *banner-size* 50
+  "Extra window height for the top info banner")
 (defparameter *steppable-types*
   '(:cat (:player :cheese)
     :player (:cat :cheese)
@@ -86,7 +94,7 @@
 (defun make-game-object (obj-type x y)
   (let* ((tile-size (truncate *window-size* *game-size*))
          (x-px (* tile-size x))
-         (y-px (* tile-size y))
+         (y-px (+ *banner-size* (* tile-size y)))
          (rect (sdl2:make-rect x-px y-px tile-size tile-size))
          (prev-rect (sdl2:copy-rect rect)))
     (make-instance 'game-object
@@ -102,7 +110,7 @@
          (x-prime (clamp x 0 (1- *game-size*)))
          (y-prime (clamp y 0 (1- *game-size*)))
          (x-px (* tile-size x-prime))
-         (y-px (* tile-size y-prime)))
+         (y-px (+ *banner-size* (* tile-size y-prime))))
     (with-slots (x y rect prev-rect) obj
       (sdl2:copy-into-rect prev-rect rect)
       (setf x x-prime
@@ -145,6 +153,7 @@
           ; Stop timers when we're out of lives
           ; Cats will random-walk under the mouse otherwise
           (when (<= *lives* 0)
+            (setf *game-state* :lost) ; Out of lives, game is lost.
             (sdl2-util:remove-timers :updatecats)))
         (:cheese :box
           (setf *game-objects*
@@ -189,28 +198,15 @@
   (lambda (obj)
     (eql obj-type (gobj-type obj))))
 
-(defun get-objects (obj-type)
-  (remove-if-not (game-obj-type obj-type) *game-objects*))
-
-
-
-
-(defun game-status ()
-  "Return a symbol representing the game status. It is one of:
-   :gameover - Game has been played to completion.
-   :playing - Game is in progress"
-  ; Game over condition: Player is not null and overlaps with a cat object.
-  (cond ((and *player*
-              (<= *lives* 0))
-         :gameover)
-        (t :playing)))
+(defvar *renderer* nil
+  "Reference to the current renderer, used in run-game")
 
 (defun cat-stuck-p (x y)
   "Return if a cat at location x,y would be stuck"
   (not (steppable-directions x y)))
 
 (defun gobj-sprite (obj)
-  "Return SDL surface corresponding to a game object, loading it from disk if required."
+  "Return image surface corresponding to a game object, loading it from disk if required."
   (let* ((obj-type (gobj-type obj))
          (sprite-type (case obj-type
                         (:cat (if (cat-stuck-p (gobj-x obj)
@@ -220,11 +216,11 @@
                         (t obj-type)))
          (sprite (getf *sprites* sprite-type)))
     (unless sprite
-      (let ((bitmap (sdl2-image:load-image (concatenate 'string
-                                                       (symbol-name sprite-type)
-                                                       ".png"))))
-        (setf sprite bitmap
-              (getf *sprites* sprite-type) bitmap)))
+      (let* ((filename (concatenate 'string (symbol-name sprite-type) ".png"))
+             (surface (sdl2-image:load-image filename))
+             (texture (sdl2:create-texture-from-surface *renderer* surface)))
+        (setf sprite texture
+              (getf *sprites* sprite-type) texture)))
     sprite))
 
 (defun render-game-object (surf win obj)
@@ -238,8 +234,8 @@
 (defvar *last-ticks* 0)
 (defun event-idle (surf win)
   (bordeaux-threads:with-lock-held (*idle-lock*)
-    ; framerate limiter
-#|    (if (<= 10 (- (sdl2:get-ticks) *last-ticks*))
+    ; framerate limiter - do nothing until at least 10ms have passed
+    #| (if (<= 10 (- (sdl2:get-ticks) *last-ticks*))
         (return-from event-idle)
         (setf *last-ticks* (sdl2:get-ticks))) |#
     ; Game timers
@@ -251,14 +247,20 @@
       (render-game-object surf win o))
     ;Draw current game info
     (sdl2-util:draw-text win surf
-                         (format nil "LIVES: ~A       SCORE: ~A" *lives* *score*)
+                         (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
                          0 0
                          255 255 255 255)
+    ;Border between game info and game objects
+    ; TODO
     ;Perform status-specific updates
-    (case (game-status)
-      (:gameover
+    (case *game-state*
+      (:lost
         (sdl2-util:draw-text win surf 
                              "GAME OVER" 100 100 
+                             255 255 255 255))
+      (:won
+        (sdl2-util:draw-text win surf
+                             "YOU WON!" 100 100
                              255 255 255 255)))
     (sdl2:update-window win)))
 
@@ -318,7 +320,7 @@
     (unless (and (jmutil:clampedp xp 0 (1- *game-size*))
                  (jmutil:clampedp yp 0 (1- *game-size*)))
       (return-from push-object-at nil))
-    ; Attempt to push next object
+    ; Attempt to push next object which might be in the way.
     (unless (push-object-at xp yp +x +y)
       (return-from push-object-at nil))
     ; Move all movable objects to the new location
@@ -355,7 +357,7 @@
       (sdl2:push-user-event :mvplayer '( 1 -1)))))
 
 (defun event-mvplayer (datum)
-  (when (eq (game-status) :gameover)
+  (when (find *game-state* '(:won :lost))
     (return-from event-mvplayer))
   (let ((+x (first datum))
         (+y (second datum)))
@@ -416,18 +418,24 @@
         (when (steppablep x y +x +y)
           (push (list +x +y) dirs))))))
 
+(defun random-cat ()
+  (loop for x = (random *game-size*) then (random *game-size*)
+        for y = (random *game-size*) then (random *game-size*)
+        until (null (game-objects-at x y))
+        finally (push (make-game-object :cat x y) *game-objects*)))
+
 
 (defun next-level ()
   "Load the next level, or otherwise act to progress the game"
-  (cond ((> 0 *remaining-cats*) ; Levels continue as long as more cats are needed.
-         (dotimes (c (random (min 4 *remaining-cats*))) ; Generate up to *remaining-cats* cats
-           (loop for x = (random *game-size*) then (random *game-size*)
-                 for y = (random *game-size*) then (random *game-size*)
-                 until (null (game-objects-at x y))
-                 finally (push (make-game-object :cat x y) *game-objects*))))
-       (*levels*  ; Load the next level.
-        (load-level (first *levels*))
-        (setf *levels* (rest *levels*)))))
+  (cond ((> *remaining-cats* 0) ; Levels continue as long as more cats are needed.
+         (dotimes (c (max 1 (random (min 4 *remaining-cats*)))) ; Generate up to *remaining-cats* cats
+           (random-cat)))
+        (*levels*  ; Load the next level.
+          (load-level (first *levels*))
+          (setf *levels* (rest *levels*))
+          (incf *score* 200)) ; Bonus points for each level
+        ; Out of levels - player won the game!
+        (t (setf *game-state* :won))))
 
 
 (defun update-cats ()
@@ -447,7 +455,9 @@
     (when (or (null cats)
               (= (length cats) stuck-cats))
       (dolist (c cats) ; turn cats to cheese
+        (decf *remaining-cats*)  
         (setf (gobj-type c) :cheese))
+      (incf *score* (* stuck-cats 50))
       (next-level))))
 
 (defun event-updatecats ()
@@ -459,14 +469,15 @@
       (sdl2-util:remove-timers :updatecats)
       (sdl2-util:make-sdl-userevent-timer 1000 :updatecats :ident :updatecats)
       ; Reset player lives
-      (setf *lives* 1))
+      (setf *lives* 1)
+      (setf *game-state* nil)
+      (setf *score* 0))
 
 
 (defun run-game ()
-  (sb-posix:chdir #P"/home/jakykong/lisp/mouse")
   (finish-output)
   (setf *last-ticks* (sdl2:get-ticks))
-  (with-sdl-thread (:title "Mouse Game" :h *window-size* :w *window-size*)
+  (with-sdl-thread (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
     (sdl2-image:init '(:png)) ; Enable loading of images for tiles
     (let ()
       ; Default minimum data that satisfies assumptions later in code.
@@ -542,20 +553,24 @@
 
 (defparameter *example-level-1*
   '(:game-size 10
+    :num-cats 2
+    :bonus-lives 1
     :contents
-        (*   *   *   *   *   *   *   *   *   *
-         *   *   *   *   *   *   *   *   *   *
-         *   *   b   b   b   b   b   b   *   *
-         *   *   b   b   b   b   b   b   *   *
-         *   *   b   b   m   b   b   b   *   *
-         *   *   b   b   b   b   b   b   *   *
-         *   *   b   b   b   b   b   b   *   *
-         *   *   b   b   b   b   b   b   *   *
-         *   *   *   *   *   *   *   *   *   c
-         *   *   *   *   *   *   *   *   *   *)))
+    (* * * * * * * * * *
+     * * * * * * * * * *
+     * * b b b b b b * *
+     * * b b b b b b * *
+     * * b b m b b b * *
+     * * b b b b b b * *
+     * * b b b b b b * *
+     * * b b b b b b * *
+     * * * * * * * * * c
+     * * * * * * * * * *)))
 
 (defparameter *example-level-2*
   '(:game-size 20
+    :num-cats 8
+    :bonus-lives 1
     :contents
         (* * * * * * * c * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
@@ -581,6 +596,8 @@
 
 (defparameter *example-level-3*
   '(:game-size 20
+    :num-cats 8
+    :bonus-lives 1
     :contents
         (* * * * * * * c * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
@@ -603,14 +620,17 @@
          * * * * * * * * * c * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *)))
 
+
+(defparameter *example-levelset*
+  (list *example-level-1* *example-level-2* *example-level-3*))
+
 (defun edit-level (size &key (game-objects nil) (lives nil) (cats 0))
   "A basic level editor; click to cycle through object types in each grid square."
-  (sb-posix:chdir #P"/home/jakykong/lisp/mouse")
   (free-game-objects)
   (setf *game-objects* game-objects)
   (setf *game-size* size)
   (let ((result nil))
-    (sdl2-util::with-initialized-sdl (:title "Mouse Game" :h *window-size* :w *window-size*)
+    (sdl2-util:with-initialized-sdl (:title "Mouse Game" :h *window-size* :w *window-size*)
       (sdl2-image:init '(:png)) ; Enable loading of images for tiles
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
@@ -643,6 +663,8 @@
           (remove-if (curry #'eql :nothing) *game-objects* :key #'gobj-type))
     ; Convert resultant data into level set suitable for #'load-level
     `(:game-size ,size 
+      :num-cats ,cats
+      :bonus-lives ,lives
       :contents ,(loop for y from 0 to (1- size)
                        appending (loop for x from 0 to (1- size) 
                                        collect (let ((obj (first (game-objects-at x y))))
@@ -655,3 +677,9 @@
   (load-level (edit-level size))
   (run-game)
   (event-startgame))
+
+(defun play-levelset (levelset)
+  (event-startgame)
+  (load-level (first levelset))
+  (setf *levels* (rest levelset))
+  (run-game))
