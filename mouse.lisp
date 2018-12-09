@@ -1,7 +1,8 @@
 (in-package :mouse)
 
-; Resources stored in script folder, not sure how to handle this better.
-(sb-posix:chdir #P"/home/jakykong/lisp/mouse")
+; Resources stored in script folder, return filenames from there for loading purposes.
+(defun resource-path (resource-name &key (type "png"))
+  (asdf:system-relative-pathname :mouse resource-name :type type))
 
 ; Dependencies
 (ql:quickload '(:sdl2 :sdl2-ttf :bordeaux-threads :alexandria :sdl2-util :jmutil :sdl2-util :sdl2-image))
@@ -63,6 +64,8 @@
 
 (defparameter *idle-lock* (bordeaux-threads:make-lock "Game Idle Lock")
   "Lock for any idle activity")
+
+(defparameter *font* (sdl2-util:get-font (resource-path "DejaVuSansMono" :type "ttf") 28))
 
 (defvar *levels* nil)
 
@@ -221,7 +224,7 @@
                         (t obj-type)))
          (sprite (getf *sprites* sprite-type)))
     (unless sprite
-      (let* ((filename (concatenate 'string (symbol-name sprite-type) ".png"))
+      (let* ((filename (resource-path (symbol-name sprite-type) :type "png"))
              (surface (sdl2-image:load-image filename))
              (texture (sdl2:create-texture-from-surface *renderer* surface)))
         (setf sprite texture
@@ -254,6 +257,7 @@
     ;Draw current game info
     (sdl2-util:draw-text rend
                          (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
+                         *font*
                          0 0
                          255 255 255 255)
     ;Border between game info and game objects
@@ -262,11 +266,15 @@
     (case *game-state*
       (:lost
         (sdl2-util:draw-text rend
-                             "GAME OVER" 100 100 
+                             "GAME OVER"
+                             *font*
+                             100 100 
                              255 255 255 255))
       (:won
         (sdl2-util:draw-text rend
-                             "YOU WON!" 100 100
+                             "YOU WON!"
+                             *font*
+                             100 100
                              255 255 255 255)))
     (sdl2:render-present rend)))
 
