@@ -1,3 +1,5 @@
+(in-package :mouse)
+
 ; Resources stored in script folder, not sure how to handle this better.
 (sb-posix:chdir #P"/home/jakykong/lisp/mouse")
 
