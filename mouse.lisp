@@ -120,6 +120,11 @@
          (y-prime (clamp y 0 (1- *game-size*)))
          (x-px (* tile-size x-prime))
          (y-px (+ *banner-size* (* tile-size y-prime))))
+    ; Check for collisions at target location
+    (let ((targ-objs (game-objects-at x y)))
+      (when (>= (length targ-objs) 0)
+        (dolist (o targ-objs)
+          (collide-object (list o obj)))))
     (with-slots (x y rect prev-rect) obj
       (sdl2:copy-into-rect prev-rect rect)
       (setf x x-prime
@@ -133,6 +138,7 @@
                      (= (gobj-x obj) x)
                      (= (gobj-y obj) y)))
                  *game-objects*))
+
 (defun collide-object (objs)
   "Called when game objects collide
    A collision is when two objects enter the same position on the board as a result of movement.
@@ -180,22 +186,18 @@
         (:hole :box
           (setf *game-objects*
                 (remove (if (eql type1 :hole)
-                            (first objs)
-                            (second objs))
+                            (second objs) ; remove box, not hole
+                            (first objs))
                         *game-objects*)))
         (:hole :player
           (setf *player-stuck*
-                (+ (sdl2:get-ticks) *hole-stuck-time*)))))))
+                (+ (sdl2:get-ticks) *hole-stuck-time*))
+          (format t "Player stuck until ~A" *hole-stuck-time*))))))
 
 (defmethod move-relative ((obj game-object) +x +y)
   (with-slots (x y) obj
-    (move-game-object obj (+ x +x) (+ y +y))
-    ; Check for collisions
-    (let ((objs (game-objects-at x y)))
-      (when (>= (length objs) 2)
-        (alexandria:map-combinations #'collide-object
-                                     objs
-                                     :length 2)))))
+    ; Finish by moving
+    (move-game-object obj (+ x +x) (+ y +y))))
 
 (defmethod in-bounds-p (x y)
   "Return whether x,y is in bounds, nil if out of bounds"
@@ -334,8 +336,14 @@
         (yp (+ y +y)))
     ; If x,y is empty, nothing to do - push succeeds de facto.
     (unless o (return-from push-object-at t))
-    ; If any object here is not pushable then fail.
-    (when (find-if-not #'pushablep o)
+    ; If any object here is not pushable and not steppable then fail.
+    (when (find-if-not (lambda (o) 
+                         (or (pushablep o)
+                             (steppablep (gobj-x o)
+                                         (gobj-y o)
+                                         +x
+                                         +y)))
+                       o)
       (return-from push-object-at nil))
     ; If x,y->+x,+y is steppable, then step.
     (when (steppablep x y +x +y)
@@ -389,6 +397,8 @@
 (defun event-mvplayer (datum)
   (when (find *game-state* '(:won :lost))
     (return-from event-mvplayer))
+  (when *player-stuck* 
+    (return-from event-mvplayer)) 
   (let ((+x (first datum))
         (+y (second datum)))
     (push-object-at (gobj-x *player*)
@@ -542,7 +552,8 @@
 (defun run-game ()
   (finish-output)
   (setf *last-ticks* (sdl2:get-ticks))
-  (sdl2-util:with-initialized-sdl
+  (setf *sprites* nil) ; Can't re-use sprites between runs.
+  (sdl2-util:with-sdl-thread
         (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
     (setf *renderer* rend)
     (sdl2-image:init '(:png)) ; Enable loading of images for tiles
@@ -675,7 +686,8 @@
                   t) |#
         (:mousebuttondown (:x xpx :y ypx)
          (let* ((x (truncate xpx (truncate *window-size* size)))
-                (y (truncate ypx (truncate *window-size* size)))
+                (y (truncate (- ypx *banner-size*)
+                             (truncate *window-size* size)))
                 (existing-objects (game-objects-at x y))
                 (obj (first existing-objects)))
            (if existing-objects
