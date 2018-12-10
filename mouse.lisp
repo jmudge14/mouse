@@ -50,8 +50,9 @@
     :player (:cat :cheese)
     :box (:cheese))
   "Game object types that can move, paired with object types they can move on top of.")
-(defparameter *pushable-types* '(:player :box)
-  "Kinds of objects that can be pushed or pushed onto")
+(defparameter *pushable-types* '(:player :box :cat)
+  "Kinds of objects that can be pushed or pushed onto.
+   Special case of cat, which can be pushed but not itself push, handeld in #'push-object-at")
 (defparameter *movable-types* '(:player :box :cat)
   "Kinds of objects that can move")
 
@@ -327,6 +328,11 @@
     (unless (and (jmutil:clampedp xp 0 (1- *game-size*))
                  (jmutil:clampedp yp 0 (1- *game-size*)))
       (return-from push-object-at nil))
+    ; In case of a cat, if target coordinates are not steppable, fail to push.
+    ; This allows a cat to be pushed, but not to push anything else.
+    (when (find :cat (game-objects-at x y) :key #'gobj-type)
+        (unless (steppablep x y xp yp)
+          (return-from push-object-at nil)))
     ; Attempt to push next object which might be in the way.
     (unless (push-object-at xp yp +x +y)
       (return-from push-object-at nil))
@@ -407,6 +413,10 @@
          (distances (remove-if-not (curry #'close-to 0.1 min-distance)
                                    all-distances
                                    :key #'first)))
+    ; Small chance of picking a completely random direction
+    ; This allows cats to get "unstuck" from some obstacles.
+    (if (= 0 (random 9))
+        (setf distances all-distances))
     (if distances
         (rest (elt distances (random (length distances))))
         nil)))
@@ -465,7 +475,7 @@
 (defun next-level ()
   "Load the next level, or otherwise act to progress the game"
   (cond ((> *remaining-cats* 0) ; Levels continue as long as more cats are needed.
-         (dotimes (c (max 1 (random (min 4 *remaining-cats*)))) ; Generate up to *remaining-cats* cats
+         (dotimes (c (min 2 *remaining-cats*)) ; Generate up to *remaining-cats* cats, two at a time.
            (random-cat)))
         (*levels*  ; Load the next level.
           (load-level (first *levels*))
@@ -506,7 +516,7 @@
       (sdl2-util:remove-timers :updatecats)
       (sdl2-util:make-sdl-userevent-timer 1000 :updatecats :ident :updatecats)
       ; Reset player lives
-      (setf *lives* 1)
+      (setf *lives* 3)
       (setf *game-state* nil)
       (setf *score* 0))
 
