@@ -1,27 +1,20 @@
 (in-package :mouse)
 
+(shadowing-import '(sdl2-util:get-font
+                    sdl2-util:draw-text
+                    sdl2-util:rgb
+                    sdl2-util:with-initialized-sdl
+                    sdl2-util:with-sdl-thread
+                    sdl2-util:remove-timers
+                    sdl2-util:scancode-case
+                    sdl2-util:do-timers
+                    alexandria:curry
+                    alexandria:clamp
+                    jmutil:clampedp))
+
 ; Resources stored in script folder, return filenames from there for loading purposes.
 (defun resource-path (resource-name &key (type "png"))
   (asdf:system-relative-pathname :mouse resource-name :type type))
-
-; Dependencies
-(ql:quickload '(:sdl2 :sdl2-ttf :bordeaux-threads :alexandria :sdl2-util :jmutil :sdl2-util :sdl2-image))
-
-(require :sdl2)
-(require :sdl2-image)
-(require :sdl2-ttf)
-(require :bordeaux-threads)
-(require :alexandria)
-(require :sdl2-util)
-(require :jmutil)
-
-
-(import 'alexandria:clamp)
-(import 'alexandria:curry)
-(import 'sdl2-util:with-sdl-thread)
-(import 'sdl2-util:with-initialized-sdl)
-(import 'sdl2-util:rgb)
-(import 'jmutil:clampedp)
 
 
 
@@ -65,7 +58,7 @@
 (defparameter *idle-lock* (bordeaux-threads:make-lock "Game Idle Lock")
   "Lock for any idle activity")
 
-(defparameter *font* (sdl2-util:get-font (resource-path "DejaVuSansMono" :type "ttf") 28))
+(defparameter *font* (get-font (resource-path "DejaVuSansMono" :type "ttf") 28))
 
 (defvar *levels* nil)
 
@@ -160,7 +153,7 @@
           ; Cats will random-walk under the mouse otherwise
           (when (<= *lives* 0)
             (setf *game-state* :lost) ; Out of lives, game is lost.
-            (sdl2-util:remove-timers :updatecats)))
+            (remove-timers :updatecats)))
         (:cheese :box
           (setf *game-objects*
                 (remove (if (eql type1 :cheese)
@@ -248,34 +241,34 @@
         (return-from event-idle)
         (setf *last-ticks* (sdl2:get-ticks))) |#
     ; Game timers
-    (sdl2-util:do-timers)
+    (do-timers)
     ; Clear buffer
     (sdl2:render-clear rend)
     ;Redraw game objects
     (dolist (o *game-objects*)
       (render-game-object rend o))
     ;Draw current game info
-    (sdl2-util:draw-text rend
-                         (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
-                         *font*
-                         0 0
-                         255 255 255 255)
+    (draw-text rend
+               (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
+               *font*
+               0 0
+               255 255 255 255)
     ;Border between game info and game objects
     ; TODO
     ;Perform status-specific updates
     (case *game-state*
       (:lost
-        (sdl2-util:draw-text rend
-                             "GAME OVER"
-                             *font*
-                             100 100 
-                             255 255 255 255))
+        (draw-text rend
+                   "GAME OVER"
+                   *font*
+                   10 50
+                   255 255 255 255))
       (:won
-        (sdl2-util:draw-text rend
-                             "YOU WON!"
-                             *font*
-                             100 100
-                             255 255 255 255)))
+        (draw-text rend
+                   "YOU WON!"
+                   *font*
+                   10 50
+                   255 255 255 255)))
     (sdl2:render-present rend)))
 
 (defmethod catp ((o game-object))
@@ -521,7 +514,7 @@
 (defun run-game ()
   (finish-output)
   (setf *last-ticks* (sdl2:get-ticks))
-  (with-initialized-sdl
+  (sdl2-util:with-initialized-sdl
         (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
     (setf *renderer* rend)
     (sdl2-image:init '(:png)) ; Enable loading of images for tiles
