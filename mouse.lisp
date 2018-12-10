@@ -1,16 +1,5 @@
 (in-package :mouse)
 
-(shadowing-import '(sdl2-util:get-font
-                    sdl2-util:draw-text
-                    sdl2-util:rgb
-                    sdl2-util:with-initialized-sdl
-                    sdl2-util:with-sdl-thread
-                    sdl2-util:remove-timers
-                    sdl2-util:scancode-case
-                    sdl2-util:do-timers
-                    alexandria:curry
-                    alexandria:clamp
-                    jmutil:clampedp))
 
 ; Resources stored in script folder, return filenames from there for loading purposes.
 (defun resource-path (resource-name &key (type "png"))
@@ -21,6 +10,9 @@
 (defparameter *cat-random-chance* 9
              "One in *cat-random-chance* chance of cats moving randomly instead of
               toward the player.")
+
+(defvar *next-cat-spawn-time* nil)
+(defvar *next-cat-spawn-delay* 10000)
 
 
 
@@ -125,6 +117,7 @@
       (when (>= (length targ-objs) 0)
         (dolist (o targ-objs)
           (collide-object (list o obj)))))
+    ; Update location
     (with-slots (x y rect prev-rect) obj
       (sdl2:copy-into-rect prev-rect rect)
       (setf x x-prime
@@ -196,7 +189,6 @@
 
 (defmethod move-relative ((obj game-object) +x +y)
   (with-slots (x y) obj
-    ; Finish by moving
     (move-game-object obj (+ x +x) (+ y +y))))
 
 (defmethod in-bounds-p (x y)
@@ -235,6 +227,9 @@
                                                (gobj-y obj))
                                   :cat-stuck
                                   :cat))
+                        (:player (if *player-stuck*
+                                     :player-stuck
+                                     :player))
                         (t obj-type)))
          (sprite (getf *sprites* sprite-type)))
     (unless sprite
@@ -252,12 +247,25 @@
     (sdl2:render-copy rend sprite :dest-rect (gobj-rect obj))))
 
 
+(defun format-ticks (tick-count)
+  (if tick-count
+      (let* ((mins (truncate tick-count 60000))
+             (secs (mod (round tick-count 1000)
+                        60)))
+        (format nil "~A:~A" mins secs))
+      ""))
+
 (defun event-idle (win rend)
   "Called for the :idle event in SDL event loop"
   (declare (ignore win))
   (bordeaux-threads:with-lock-held (*idle-lock*)
     ; Game timers
     (do-timers)
+    ; Spawn cats
+    (when (and *next-cat-spawn-time*
+               (>= (sdl2:get-ticks) *next-cat-spawn-time*))
+      (spawn-cats)
+      (increment-cat-spawn-timer))
     ; Check if player is unstuck from hole
     (when (and *player-stuck* 
                (>= (sdl2:get-ticks) *player-stuck*))
@@ -269,7 +277,13 @@
       (render-game-object rend o))
     ;Draw current game info
     (draw-text rend
-               (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A" *lives* *score* *remaining-cats*)
+               (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A  ~A"
+                       *lives*
+                       *score*
+                       *remaining-cats*
+                       (format-ticks (if *next-cat-spawn-time*
+                                         (- *next-cat-spawn-time* (sdl2:get-ticks))
+                                         nil)))
                *font*
                0 0
                255 255 255 255)
@@ -473,14 +487,18 @@
     (let ((game-size (getf game-data :game-size))
           (contents  (getf game-data :contents))
           (num-cats  (getf game-data :num-cats))
-          (bonus-lives (getf game-data :bonus-lives)))
+          (bonus-lives (getf game-data :bonus-lives))
+          (cat-spawn-delay (getf game-data :cat-spawn-delay)))
       (free-game-objects)
       (setf *loaded* :in-progress
             *game-objects* nil
             *player* nil
             *game-size* game-size
             *remaining-cats* (or num-cats 0)
-            *lives* (+ *lives* (or bonus-lives 0)))
+            *lives* (+ *lives* (or bonus-lives 0))
+            *next-cat-spawn-delay* (if cat-spawn-delay
+                                       (* 1000 cat-spawn-delay)
+                                       nil))
       (loop for i = 0 then (1+ i)
             for e in contents
             do (let ((x (mod i game-size))
@@ -499,11 +517,25 @@
                      (t (push (make-game-object (alexandria:make-keyword e) x y) *game-objects*))))))
       (setf *loaded* t))))
 
+(defun spawn-cats ()
+  (when (> *remaining-cats* 0)
+    (dotimes (c (min 2 *remaining-cats*)) ; Generate up to *remaining-cats* cats, two at a time.
+      (random-cat)
+      (decf *remaining-cats*))))
+
+(defun increment-cat-spawn-timer ()
+  (setf *next-cat-spawn-time* 
+        (if (and *next-cat-spawn-delay*
+                 (> *remaining-cats* 0))
+            (+ (sdl2:get-ticks)
+               *next-cat-spawn-delay*)
+            nil)))
+
 (defun next-level ()
   "Load the next level, or otherwise act to progress the game"
   (cond ((> *remaining-cats* 0) ; Levels continue as long as more cats are needed.
-         (dotimes (c (min 2 *remaining-cats*)) ; Generate up to *remaining-cats* cats, two at a time.
-           (random-cat)))
+         (spawn-cats)
+         (increment-cat-spawn-timer))
         (*levels*  ; Load the next level.
           (load-level (first *levels*))
           (setf *levels* (rest *levels*)
@@ -546,16 +578,17 @@
       ; Reset player lives
       (setf *lives* 3)
       (setf *game-state* nil)
-      (setf *score* 0))
+      (setf *score* 0)
+      (increment-cat-spawn-timer))
 
 
 (defun run-game ()
   (finish-output)
-  (setf *last-ticks* (sdl2:get-ticks))
-  (setf *sprites* nil) ; Can't re-use sprites between runs.
   (sdl2-util:with-sdl-thread
         (:title "Mouse Game" :h (+ *window-size* *banner-size*) :w *window-size*)
+    (setf *last-ticks* (sdl2:get-ticks))
     (setf *renderer* rend)
+    (setf *sprites* nil) ; Can't re-use sprites between runs.
     (sdl2-image:init '(:png)) ; Enable loading of images for tiles
     (let ()
       ; Default minimum data that satisfies assumptions later in code.
@@ -591,6 +624,7 @@
 (defparameter *example-level-1*
   '(:game-size 10
     :num-cats 2
+    :cat-spawn-delay 5
     :bonus-lives 1
     :contents
     (* * * * * * * * * *
@@ -606,7 +640,8 @@
 
 (defparameter *example-level-2*
   '(:game-size 20
-    :num-cats 8
+    :num-cats 7
+    :cat-spawn-delay 60
     :bonus-lives 1
     :contents
         (* * * * * * * * * * * * * * * * * * * *
@@ -633,7 +668,8 @@
 
 (defparameter *example-level-3*
   '(:game-size 20
-    :num-cats 8
+    :num-cats 7
+    :cat-spawn-delay 60
     :cat-spawn-time 60
     :bonus-lives 1
     :contents
