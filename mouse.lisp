@@ -16,12 +16,21 @@
 (defun resource-path (resource-name &key (type "png"))
   (asdf:system-relative-pathname :mouse resource-name :type type))
 
+(defparameter *hole-stuck-time* 3000
+             "Milliseconds for a player to be stuck once in a hole") 
+(defparameter *cat-random-chance* 9
+             "One in *cat-random-chance* chance of cats moving randomly instead of
+              toward the player.")
+
+
 
 
 (defvar *game-objects* nil
   "List of game objects, which will be updated during gameplay.")
 (defvar *player* nil
   "The player object (mouse), to avoid searching *game-objects* each time it is required.")
+(defvar *player-stuck* nil
+  "If not nil, disable movement keys until (>= *player-stuck* (sdl2:get-tickts)) .")
 (defvar *loaded* nil
   "Indicates whether a level has been loaded or is in progress of being loaded,
    for purposes of suspending rendering and game checks while data integrity
@@ -47,8 +56,8 @@
   "Extra window height for the top info banner")
 (defparameter *steppable-types*
   '(:cat (:player :cheese)
-    :player (:cat :cheese)
-    :box (:cheese))
+    :player (:cat :cheese :hole)
+    :box (:cheese :hole))
   "Game object types that can move, paired with object types they can move on top of.")
 (defparameter *pushable-types* '(:player :box :cat)
   "Kinds of objects that can be pushed or pushed onto.
@@ -167,7 +176,16 @@
                             (first objs)
                             (second objs))
                         *game-objects*)
-                *score* (+ *score* 100)))))))
+                *score* (+ *score* 100)))
+        (:hole :box
+          (setf *game-objects*
+                (remove (if (eql type1 :hole)
+                            (first objs)
+                            (second objs))
+                        *game-objects*)))
+        (:hole :player
+          (setf *player-stuck*
+                (+ (sdl2:get-ticks) *hole-stuck-time*)))))))
 
 (defmethod move-relative ((obj game-object) +x +y)
   (with-slots (x y) obj
@@ -232,17 +250,16 @@
     (sdl2:render-copy rend sprite :dest-rect (gobj-rect obj))))
 
 
-(defvar *last-ticks* 0)
 (defun event-idle (win rend)
   "Called for the :idle event in SDL event loop"
   (declare (ignore win))
   (bordeaux-threads:with-lock-held (*idle-lock*)
-    ; framerate limiter - do nothing until at least 10ms have passed
-    #| (if (<= 10 (- (sdl2:get-ticks) *last-ticks*))
-        (return-from event-idle)
-        (setf *last-ticks* (sdl2:get-ticks))) |#
     ; Game timers
     (do-timers)
+    ; Check if player is unstuck from hole
+    (when (and *player-stuck* 
+               (>= (sdl2:get-ticks) *player-stuck*))
+      (setf *player-stuck* nil))
     ; Clear buffer
     (sdl2:render-clear rend)
     ;Redraw game objects
@@ -415,7 +432,7 @@
                                    :key #'first)))
     ; Small chance of picking a completely random direction
     ; This allows cats to get "unstuck" from some obstacles.
-    (if (= 0 (random 9))
+    (if (= 0 (random *cat-random-chance*))
         (setf distances all-distances))
     (if distances
         (rest (elt distances (random (length distances))))
@@ -479,7 +496,8 @@
            (random-cat)))
         (*levels*  ; Load the next level.
           (load-level (first *levels*))
-          (setf *levels* (rest *levels*))
+          (setf *levels* (rest *levels*)
+                *player-stuck* nil)
           (incf *score* 200)) ; Bonus points for each level
         ; Out of levels - player won the game!
         (t (setf *game-state* :won))))
@@ -580,7 +598,7 @@
     :num-cats 8
     :bonus-lives 1
     :contents
-        (* * * * * * * c * * * * * * * * * * * *
+        (* * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
          * * * b b b b b b b b b b b b b b * * *
@@ -589,7 +607,7 @@
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * c *
-         c * * b b b b b b m b b b b b b b * * *
+         * * * b b b b b b m b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
@@ -598,16 +616,17 @@
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * c * * * * * * * * * *
+         * * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *)))
 
 
 (defparameter *example-level-3*
   '(:game-size 20
     :num-cats 8
+    :cat-spawn-time 60
     :bonus-lives 1
     :contents
-        (* * * * * * * c * * * * * * * * * * * *
+        (* * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *
          * * * b b b b b b b b b b b b b b * * *
@@ -616,7 +635,7 @@
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * c *
-         c * * b b b b b b m b b b b b b b * * *
+         * * * b b b b b b m b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b x b b b * * *
          * * * b b b b b b b b b b b b b b * * *
@@ -625,7 +644,7 @@
          * * * b b b b b b b b b b b b b b * * *
          * * * b b b b b b b b b b b b b b * * *
          * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * c * * * * * * * * * *
+         * * * * * * * * * * * * * * * * * * * *
          * * * * * * * * * * * * * * * * * * * *)))
 
 
@@ -662,11 +681,12 @@
            (if existing-objects
                (setf (gobj-type obj)
                      (case (gobj-type obj)
+                       (:nothing :box)
                        (:box :cat)
                        (:cat :player)
                        (:player :brick)
-                       (:brick :nothing)
-                       (t :box)))
+                       (:brick  :hole)
+                       (t :nothing)))
                (push (make-game-object :box x y) *game-objects*))))))
     (setf *game-objects*
           (remove-if (curry #'eql :nothing) *game-objects* :key #'gobj-type))
