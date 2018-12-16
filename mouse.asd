@@ -8,7 +8,8 @@
   :serial t
   :depends-on (#:sdl2 #:sdl2-ttf #:sdl2-image
                #:bordeaux-threads #:alexandria 
-               ; Local libraries from Jack Mudge (not in quicklisp):
+               ; Local libraries from Jack Mudge (not in main quicklisp dist):
                #:sdl2-util #:jmutil)
   :components ((:file "package")
-               (:file "mouse")))
+               (:file "mouse")
+               (:file "levels")))

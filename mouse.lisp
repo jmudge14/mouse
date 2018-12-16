@@ -47,7 +47,7 @@
 (defparameter *banner-size* 50
   "Extra window height for the top info banner")
 (defparameter *steppable-types*
-  '(:cat (:player :cheese)
+  '(:cat (:player :cheese :hole)
     :player (:cat :cheese :hole)
     :box (:cheese :hole))
   "Game object types that can move, paired with object types they can move on top of.")
@@ -132,6 +132,8 @@
                      (= (gobj-y obj) y)))
                  *game-objects*))
 
+
+
 (defun collide-object (objs)
   "Called when game objects collide
    A collision is when two objects enter the same position on the board as a result of movement.
@@ -157,7 +159,8 @@
             (loop for x = (random *game-size*) then (random *game-size*)
                   for y = (random *game-size*) then (random *game-size*)
                   until (= 0 (length (game-objects-at x y)))
-                  finally (move-game-object *player* x y)))
+                  finally (move-game-object *player* x y))
+            (setf *player-stuck* nil))
           ; Stop timers when we're out of lives
           ; Cats will random-walk under the mouse otherwise
           (when (<= *lives* 0)
@@ -177,6 +180,7 @@
                         *game-objects*)
                 *score* (+ *score* 100)))
         (:hole :box
+          (print "Removing box for hole:Box collision~%")
           (setf *game-objects*
                 (remove (if (eql type1 :hole)
                             (second objs) ; remove box, not hole
@@ -255,6 +259,19 @@
         (format nil "~A:~A" mins secs))
       ""))
 
+(defparameter *game-object-sort-order* 
+  '(:player :cat :box :cheese :hole :nothing)
+  "Stacking order for rendering game objects")
+
+(defun gobj-sort-order (obj1 obj2)
+  (let ((p1 (position (gobj-type obj1)
+                      *game-object-sort-order*))
+        (p2 (position (gobj-type obj2)
+                      *game-object-sort-order*)))
+    (> (or p1 2)
+       (or p2 2))))
+
+(defvar *temp-debug* nil)
 (defun event-idle (win rend)
   "Called for the :idle event in SDL event loop"
   (declare (ignore win))
@@ -273,6 +290,8 @@
     ; Clear buffer
     (sdl2:render-clear rend)
     ;Redraw game objects
+    (setf *temp-debug* (copy-list *game-objects*))
+    (setf *game-objects* (sort *game-objects* #'gobj-sort-order))
     (dolist (o *game-objects*)
       (render-game-object rend o))
     ;Draw current game info
@@ -621,97 +640,35 @@
   (load-level level-data)
   (run-game))
 
-(defparameter *example-level-1*
-  '(:game-size 10
-    :num-cats 2
-    :cat-spawn-delay 5
-    :bonus-lives 1
-    :contents
-    (* * * * * * * * * *
-     * * * * * * * * * *
-     * * b b b b b b * *
-     * * b b b b b b * *
-     * * b b m b b b * *
-     * * b b b b b b * *
-     * * b b b b b b * *
-     * * b b b b b b * *
-     * * * * * * * * * c
-     * * * * * * * * * *)))
-
-(defparameter *example-level-2*
-  '(:game-size 20
-    :num-cats 7
-    :cat-spawn-delay 60
-    :bonus-lives 1
-    :contents
-        (* * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * c *
-         * * * b b b b b b m b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *)))
 
 
-(defparameter *example-level-3*
-  '(:game-size 20
-    :num-cats 7
-    :cat-spawn-delay 60
-    :cat-spawn-time 60
-    :bonus-lives 1
-    :contents
-        (* * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b x b b b b b b b x b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * c *
-         * * * b b b b b b m b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b x b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b x b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * b b b b b b b b b b b b b b * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *
-         * * * * * * * * * * * * * * * * * * * *)))
 
-
-(defparameter *example-levelset*
-  (list *example-level-1* *example-level-2* *example-level-3*))
-
-(defun edit-level (size &key (game-objects nil) (lives nil) (cats 0))
+(defun edit-level (size &key (game-objects nil) (lives nil) (cats 0) (cat-spawn-delay nil))
   "A basic level editor; click to cycle through object types in each grid square."
   (free-game-objects)
   (setf *game-objects* game-objects)
   (setf *game-size* size)
   (let ((result nil))
-    (sdl2-util:with-initialized-sdl (:title "Mouse Game" :h *window-size* :w *window-size*)
+    (sdl2-util:with-initialized-sdl (:title "Mouse Game" :h (+ *banner-size* *window-size*) :w *window-size*)
       (setf *renderer* rend)
       (sdl2-image:init '(:png)) ; Enable loading of images for tiles
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
         (:idle () 
-         ; Render game objects on a blank canvas
+         ; Clear to black
+         (sdl2:set-render-draw-color rend 0 0 0 255)
          (sdl2:render-clear rend)
+         ; Render a grid
+         (sdl2:set-render-draw-color rend 255 255 255 255)
+         (dotimes (x size)
+           (dotimes (y size)
+             (sdl2:render-draw-rect rend
+                                    (sdl2:make-rect (* x (truncate *window-size* size))
+                                                    (+ *banner-size* 
+                                                       (* y (truncate *window-size* size)))
+                                                    (truncate *window-size* size)
+                                                    (truncate *window-size* size)))))
+         ; Render game objects on a blank canvas
          (dolist (obj *game-objects*)
            (render-game-object rend obj))
          (sdl2:render-present rend))
@@ -761,4 +718,6 @@
   (setf *levels* (rest levelset))
   (run-game)
   (event-startgame))
+
+
 
