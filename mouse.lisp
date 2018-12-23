@@ -6,7 +6,7 @@
   (asdf:system-relative-pathname :mouse resource-name :type type))
 
 (defparameter *hole-stuck-time* 3000
-             "Milliseconds for a player to be stuck once in a hole") 
+             "Milliseconds for a player to be stuck once in a hole")
 (defparameter *cat-random-chance* 9
              "One in *cat-random-chance* chance of cats moving randomly instead of
               toward the player.")
@@ -80,11 +80,11 @@
               :documentation "Tracks previous rect after a move, for animation purposes.")
    (obj-type :initarg :obj-type
              :initform nil
-             :accessor gobj-type 
+             :accessor gobj-type
              :documentation "Type of object, e.g., :PLAYER or :CAT")
    (x :initarg :x
       :initform 0
-      :accessor gobj-x 
+      :accessor gobj-x
       :documentation "Logical game horizontal location, smaller than *game-size*")
    (y :initarg :y
       :initform 0
@@ -154,8 +154,8 @@
                                        ,@body)))
                                  cases)))
                    `(cond ,@case-clauses))))
-      (type-cond 
-        (:cat :player 
+      (type-cond
+        (:cat :player
           (decf *lives*)
           ; Move to a random empty position when we have lives left
           (when (> *lives* 0)
@@ -172,13 +172,13 @@
         (:cheese :box
           (setf *game-objects*
                 (remove (if (eql type1 :cheese)
-                            obj1 
+                            obj1
                             obj2)
                         *game-objects*)))
         (:cheese :player
           (setf *game-objects*
                 (remove (if (eql type1 :cheese)
-                            obj1 
+                            obj1
                             obj2)
                         *game-objects*)
                 *score* (+ *score* 100)))
@@ -262,7 +262,7 @@
         (format nil "~A:~A" mins secs))
       ""))
 
-(defparameter *game-object-sort-order* 
+(defparameter *game-object-sort-order*
   '(:player :cat :box :cheese :hole :nothing)
   "Stacking order for rendering game objects")
 
@@ -287,7 +287,7 @@
       (spawn-cats)
       (increment-cat-spawn-timer))
     ; Check if player is unstuck from hole
-    (when (and *player-stuck* 
+    (when (and *player-stuck*
                (>= (sdl2:get-ticks) *player-stuck*))
       (setf *player-stuck* nil))
     ; Clear buffer
@@ -373,7 +373,7 @@
     ; If x,y is empty, nothing to do - push succeeds de facto.
     (unless o (return-from push-object-at t))
     ; If any object here is not pushable and not steppable then fail.
-    (when (find-if-not (lambda (o) 
+    (when (find-if-not (lambda (o)
                          (or (pushablep o)
                              (steppablep (gobj-x o)
                                          (gobj-y o)
@@ -416,7 +416,7 @@
     ((:scancode-escape :scancode-capslock)
      (sdl2:push-quit-event))
     ; Movement keys
-    (:scancode-kp-1 
+    (:scancode-kp-1
       (sdl2:push-user-event :mvplayer '(-1  1)))
     ((:scancode-down :scancode-kp-2)
       (sdl2:push-user-event :mvplayer '( 0  1)))
@@ -436,8 +436,8 @@
 (defun event-mvplayer (datum)
   (when (find *game-state* '(:won :lost))
     (return-from event-mvplayer))
-  (when *player-stuck* 
-    (return-from event-mvplayer)) 
+  (when *player-stuck*
+    (return-from event-mvplayer))
   (let ((+x (first datum))
         (+y (second datum)))
     (push-object-at (gobj-x *player*)
@@ -454,7 +454,7 @@
     (sqrt (+ (expt diff-x 2)
              (expt diff-y 2)))))
 
-(defun step-distances (x y) 
+(defun step-distances (x y)
   "List of (list (player-distance-from xp,yp) dir-x dir-y) for each steppable direction from x,y"
   (let ((result nil))
     (dolist (+x '(-1 0 1) result)
@@ -489,7 +489,7 @@
 
 
 
-(defun steppable-directions (x y) 
+(defun steppable-directions (x y)
   "Return a list of directions '(x y) that the objects at x y can step.
    Nil if there are no objects at x,y or if there is no direction in which
    they can step."
@@ -497,7 +497,7 @@
         (dirs nil))
     (unless objs (return-from steppable-directions nil))
     (dolist (+x '(-1 0 1) dirs)
-      (dolist (+y '(-1 0 1)) 
+      (dolist (+y '(-1 0 1))
         (when (steppablep x y +x +y)
           (push (list +x +y) dirs))))))
 
@@ -549,7 +549,7 @@
       (decf *remaining-cats*))))
 
 (defun increment-cat-spawn-timer ()
-  (setf *next-cat-spawn-time* 
+  (setf *next-cat-spawn-time*
         (if (and *next-cat-spawn-delay*
                  (> *remaining-cats* 0))
             (+ (sdl2:get-ticks)
@@ -587,7 +587,7 @@
     (when (or (null cats)
               (= (length cats) stuck-cats))
       (dolist (c cats) ; turn cats to cheese
-        (decf *remaining-cats*)  
+        (decf *remaining-cats*)
         (setf (gobj-type c) :cheese))
       (incf *score* (* stuck-cats 50))
       (next-level))))
@@ -629,11 +629,11 @@
 
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
-        (:idle () 
+        (:idle ()
          (event-idle win rend))
         (:quit ()
          t)
-        (:keyup (:keysym keysym) 
+        (:keyup (:keysym keysym)
          (event-keyup keysym))
         (:mvplayer (:user-data datum)
          (event-mvplayer datum))
@@ -664,7 +664,7 @@
       (sdl2-image:init '(:png)) ; Enable loading of images for tiles
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
-        (:idle () 
+        (:idle ()
          ; Clear to black
          (sdl2:set-render-draw-color rend 0 0 0 255)
          (sdl2:render-clear rend)
@@ -674,7 +674,7 @@
            (dotimes (y size)
              (sdl2:render-draw-rect rend
                                     (sdl2:make-rect (* x (truncate *window-size* size))
-                                                    (+ *banner-size* 
+                                                    (+ *banner-size*
                                                        (* y (truncate *window-size* size)))
                                                     (truncate *window-size* size)
                                                     (truncate *window-size* size)))))
@@ -682,10 +682,10 @@
          (dolist (obj *game-objects*)
            (render-game-object rend obj))
          (sdl2:render-present rend))
-        (:quit () 
+        (:quit ()
           (setf result *game-objects*)
           t)
-        #|(:keyup (:keysym keysym) 
+        #|(:keyup (:keysym keysym)
                   t) |#
         (:mousebuttondown (:x xpx :y ypx)
          (let* ((x (truncate xpx (truncate *window-size* size)))
@@ -706,13 +706,13 @@
     (setf *game-objects*
           (remove-if (curry #'eql :nothing) *game-objects* :key #'gobj-type))
     ; Convert resultant data into level set suitable for #'load-level
-    `(:game-size ,size 
+    `(:game-size ,size
       :num-cats ,cats
       :bonus-lives ,lives
       :contents ,(loop for y from 0 to (1- size)
-                       appending (loop for x from 0 to (1- size) 
+                       appending (loop for x from 0 to (1- size)
                                        collect (let ((obj (first (game-objects-at x y))))
-                                                 (if obj 
+                                                 (if obj
                                                      (gobj-type obj)
                                                      '*)))))))
 
