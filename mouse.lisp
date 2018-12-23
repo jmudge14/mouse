@@ -112,18 +112,20 @@
          (y-prime (clamp y 0 (1- *game-size*)))
          (x-px (* tile-size x-prime))
          (y-px (+ *banner-size* (* tile-size y-prime))))
-    ; Check for collisions at target location
-    (let ((targ-objs (game-objects-at x y)))
-      (when (>= (length targ-objs) 0)
-        (dolist (o targ-objs)
-          (collide-object (list o obj)))))
     ; Update location
     (with-slots (x y rect prev-rect) obj
       (sdl2:copy-into-rect prev-rect rect)
       (setf x x-prime
             y y-prime
             (sdl2:rect-x rect) x-px
-            (sdl2:rect-y rect) y-px))))
+            (sdl2:rect-y rect) y-px))
+    ; Handle collisions
+    (let ((targ-objs (game-objects-at x-prime y-prime)))
+      (when (>= (length targ-objs) 2)
+        (labels ((local-collide (olist)
+                   (collide (first olist)
+                            (second olist))))
+          (alexandria:map-combinations #'local-collide targ-objs :length 2))))))
 
 (defun game-objects-at (x y)
   (remove-if-not (lambda (obj)
@@ -134,12 +136,13 @@
 
 
 
-(defun collide-object (objs)
+(defmethod collide ((obj1 game-object)
+                    (obj2 game-object))
   "Called when game objects collide
    A collision is when two objects enter the same position on the board as a result of movement.
    objs should be a list of length two."
-  (let ((type1 (gobj-type (first objs)))
-        (type2 (gobj-type (second objs))))
+  (let ((type1 (gobj-type obj1))
+        (type2 (gobj-type obj2)))
     (macrolet ((type-cond (&rest cases)
                  (let ((case-clauses
                          (mapcar (lambda (c)
@@ -169,22 +172,22 @@
         (:cheese :box
           (setf *game-objects*
                 (remove (if (eql type1 :cheese)
-                            (first objs)
-                            (second objs))
+                            obj1 
+                            obj2)
                         *game-objects*)))
         (:cheese :player
           (setf *game-objects*
                 (remove (if (eql type1 :cheese)
-                            (first objs)
-                            (second objs))
+                            obj1 
+                            obj2)
                         *game-objects*)
                 *score* (+ *score* 100)))
         (:hole :box
           (print "Removing box for hole:Box collision~%")
           (setf *game-objects*
                 (remove (if (eql type1 :hole)
-                            (second objs) ; remove box, not hole
-                            (first objs))
+                            obj2 ; remove box, not hole
+                            obj1)
                         *game-objects*)))
         (:hole :player
           (setf *player-stuck*
