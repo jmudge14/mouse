@@ -597,6 +597,10 @@
   (update-cats))
 
 (defun event-startgame ()
+  "Event to start the game"
+  (start-game))
+
+(defun start-game ()
       ; Timers for cats
       (sdl2-util:remove-timers :updatecats)
       (sdl2-util:make-sdl-userevent-timer 1000 :updatecats :ident :updatecats)
