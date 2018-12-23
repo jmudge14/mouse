@@ -355,7 +355,7 @@
               (return-from steppablep nil)))))
       nil))
 
-(defun step-object-at (x y +x +y)
+(defun step-objects-at (x y +x +y)
   "Attempt to move, without pushing, from x,y in direction +x,+y.
    Return t if move succeeded, or nil otherwise."
   (when (and (steppablep x y +x +y)
@@ -383,7 +383,7 @@
       (return-from push-object-at nil))
     ; If x,y->+x,+y is steppable, then step.
     (when (steppablep x y +x +y)
-      (step-object-at x y +x +y)
+      (step-objects-at x y +x +y)
       (return-from push-object-at t))
     ; If target coordinates are illegal, push fails.
     (unless (and (jmutil:clampedp xp 0 (1- *game-size*))
@@ -398,9 +398,12 @@
     (unless (push-object-at xp yp +x +y)
       (return-from push-object-at nil))
     ; Move all movable objects to the new location
+    (step-objects-at x y +x +y)
+    #|
     (dolist (ob o)
       (when (movablep ob)
         (move-relative ob +x +y)))
+    |#
     ; Return true when moves have all succeeded.
     t))
 
@@ -578,7 +581,7 @@
              (+x (first dir))
              (+y (second dir)))
         (if dir
-            (step-object-at cx cy +x +y) ; move in 'best' direction
+            (step-objects-at cx cy +x +y) ; move in 'best' direction
             (incf stuck-cats))))         ; mark cat as stuck
     ; Check if all cats are stuck (level win condition)
     (when (or (null cats)
