@@ -17,10 +17,10 @@
 
 
 
-(defvar *game-objects* nil
-  "List of game objects, which will be updated during gameplay.")
+(defvar *game-tiles* nil
+  "List of game tiles, which will be updated during gameplay.")
 (defvar *player* nil
-  "The player object (mouse), to avoid searching *game-objects* each time it is required.")
+  "The player tile (mouse), to avoid searching *game-tiles* each time it is required.")
 (defvar *player-stuck* nil
   "If not nil, disable movement keys until (>= *player-stuck* (sdl2:get-tickts)) .")
 (defvar *loaded* nil
@@ -50,12 +50,12 @@
   '(:cat (:player :cheese :hole)
     :player (:cat :cheese :hole)
     :box (:cheese :hole))
-  "Game object types that can move, paired with object types they can move on top of.")
+  "Game tile types that can move, paired with tile types they can move on top of.")
 (defparameter *pushable-types* '(:player :box :cat)
-  "Kinds of objects that can be pushed or pushed onto.
-   Special case of cat, which can be pushed but not itself push, handeld in #'push-object-at")
+  "Kinds of tiles that can be pushed or pushed onto.
+   Special case of cat, which can be pushed but not itself push, handeld in #'push-tile-at")
 (defparameter *movable-types* '(:player :box :cat)
-  "Kinds of objects that can move")
+  "Kinds of tiles that can move")
 
 (defparameter *idle-lock* (bordeaux-threads:make-lock "Game Idle Lock")
   "Lock for any idle activity")
@@ -69,11 +69,11 @@
 (sdl2:register-user-event-type :startgame)  ; Event for starting a game/level after loading.
 
 
-(defclass game-object ()
+(defclass game-tile ()
   ((rect :initarg :rect
          :initform (sdl2:make-rect 0 0 1 1)
          :accessor gobj-rect
-         :documentation "Current location and size of object")
+         :documentation "Current location and size of tile")
    (prev-rect :initarg :prev-rect
               :initform (sdl2:make-rect 0 0 1 1)
               :accessor gobj-prev-rect
@@ -81,7 +81,7 @@
    (obj-type :initarg :obj-type
              :initform nil
              :accessor gobj-type
-             :documentation "Type of object, e.g., :PLAYER or :CAT")
+             :documentation "Type of tile, e.g., :PLAYER or :CAT")
    (x :initarg :x
       :initform 0
       :accessor gobj-x
@@ -90,23 +90,23 @@
       :initform 0
       :accessor gobj-y
       :documentation "Logical game vertical location, smaller than *game-size*"))
-  (:documentation "Generic container for game objects"))
+  (:documentation "Generic container for game tiles"))
 
-(defun make-game-object (obj-type x y)
+(defun make-game-tile (obj-type x y)
   (let* ((tile-size (truncate *window-size* *game-size*))
          (x-px (* tile-size x))
          (y-px (+ *banner-size* (* tile-size y)))
          (rect (sdl2:make-rect x-px y-px tile-size tile-size))
          (prev-rect (sdl2:copy-rect rect)))
-    (make-instance 'game-object
+    (make-instance 'game-tile
                    :rect rect
                    :prev-rect prev-rect
                    :obj-type obj-type
                    :x x
                    :y y)))
 
-(defmethod move-game-object ((obj game-object) x y)
-  "Move a game object to a new (logical) location."
+(defmethod move-game-tile ((obj game-tile) x y)
+  "Move a game tile to a new (logical) location."
   (let* ((tile-size (truncate *window-size* *game-size*))
          (x-prime (clamp x 0 (1- *game-size*)))
          (y-prime (clamp y 0 (1- *game-size*)))
@@ -120,26 +120,26 @@
             (sdl2:rect-x rect) x-px
             (sdl2:rect-y rect) y-px))
     ; Handle collisions
-    (let ((targ-objs (game-objects-at x-prime y-prime)))
+    (let ((targ-objs (game-tiles-at x-prime y-prime)))
       (when (>= (length targ-objs) 2)
         (labels ((local-collide (olist)
                    (collide (first olist)
                             (second olist))))
           (alexandria:map-combinations #'local-collide targ-objs :length 2))))))
 
-(defun game-objects-at (x y)
+(defun game-tiles-at (x y)
   (remove-if-not (lambda (obj)
                    (and
                      (= (gobj-x obj) x)
                      (= (gobj-y obj) y)))
-                 *game-objects*))
+                 *game-tiles*))
 
 
 
-(defmethod collide ((obj1 game-object)
-                    (obj2 game-object))
-  "Called when game objects collide
-   A collision is when two objects enter the same position on the board as a result of movement.
+(defmethod collide ((obj1 game-tile)
+                    (obj2 game-tile))
+  "Called when game tiles collide
+   A collision is when two tiles enter the same position on the board as a result of movement.
    objs should be a list of length two."
   (let ((type1 (gobj-type obj1))
         (type2 (gobj-type obj2)))
@@ -161,8 +161,8 @@
           (when (> *lives* 0)
             (loop for x = (random *game-size*) then (random *game-size*)
                   for y = (random *game-size*) then (random *game-size*)
-                  until (= 0 (length (game-objects-at x y)))
-                  finally (move-game-object *player* x y))
+                  until (= 0 (length (game-tiles-at x y)))
+                  finally (move-game-tile *player* x y))
             (setf *player-stuck* nil))
           ; Stop timers when we're out of lives
           ; Cats will random-walk under the mouse otherwise
@@ -170,33 +170,33 @@
             (setf *game-state* :lost) ; Out of lives, game is lost.
             (remove-timers :updatecats)))
         (:cheese :box
-          (setf *game-objects*
+          (setf *game-tiles*
                 (remove (if (eql type1 :cheese)
                             obj1
                             obj2)
-                        *game-objects*)))
+                        *game-tiles*)))
         (:cheese :player
-          (setf *game-objects*
+          (setf *game-tiles*
                 (remove (if (eql type1 :cheese)
                             obj1
                             obj2)
-                        *game-objects*)
+                        *game-tiles*)
                 *score* (+ *score* 100)))
         (:hole :box
           (print "Removing box for hole:Box collision~%")
-          (setf *game-objects*
+          (setf *game-tiles*
                 (remove (if (eql type1 :hole)
                             obj2 ; remove box, not hole
                             obj1)
-                        *game-objects*)))
+                        *game-tiles*)))
         (:hole :player
           (setf *player-stuck*
                 (+ (sdl2:get-ticks) *hole-stuck-time*))
           (format t "Player stuck until ~A" *hole-stuck-time*))))))
 
-(defmethod move-relative ((obj game-object) +x +y)
+(defmethod move-relative ((obj game-tile) +x +y)
   (with-slots (x y) obj
-    (move-game-object obj (+ x +x) (+ y +y))))
+    (move-game-tile obj (+ x +x) (+ y +y))))
 
 (defmethod in-bounds-p (x y)
   "Return whether x,y is in bounds, nil if out of bounds"
@@ -204,12 +204,12 @@
        (clampedp y 0 (1- *game-size*))))
 
 
-(defun free-game-objects ()
-  "Cleans up game objects, particularly SDL resources which they consume"
-  (dolist (o *game-objects*)
+(defun free-game-tiles ()
+  "Cleans up game tiles, particularly SDL resources which they consume"
+  (dolist (o *game-tiles*)
     (sdl2:free-rect (gobj-rect o))
     (sdl2:free-rect (gobj-prev-rect o)))
-  (setf *game-objects* nil)
+  (setf *game-tiles* nil)
   (setf *player* nil)
   (setf *loaded* nil)
   (setf *sprites* nil)
@@ -227,7 +227,7 @@
   (not (steppable-directions x y)))
 
 (defun gobj-sprite (obj)
-  "Return image texture corresponding to a game object, loading it from disk if required."
+  "Return image texture corresponding to a game tile, loading it from disk if required."
   (let* ((obj-type (gobj-type obj))
          (sprite-type (case obj-type
                         (:cat (if (cat-stuck-p (gobj-x obj)
@@ -247,10 +247,10 @@
               (getf *sprites* sprite-type) texture)))
     sprite))
 
-(defun render-game-object (rend obj)
-  "Render game object"
+(defun render-game-tile (rend obj)
+  "Render game tile"
   (let ((sprite (gobj-sprite obj)))
-    ;Redraw game objects
+    ;Redraw game tiles
     (sdl2:render-copy rend sprite :dest-rect (gobj-rect obj))))
 
 
@@ -262,15 +262,15 @@
         (format nil "~A:~A" mins secs))
       ""))
 
-(defparameter *game-object-sort-order*
+(defparameter *game-tile-sort-order*
   '(:player :cat :box :cheese :hole :nothing)
-  "Stacking order for rendering game objects")
+  "Stacking order for rendering game tiles")
 
 (defun gobj-sort-order (obj1 obj2)
   (let ((p1 (position (gobj-type obj1)
-                      *game-object-sort-order*))
+                      *game-tile-sort-order*))
         (p2 (position (gobj-type obj2)
-                      *game-object-sort-order*)))
+                      *game-tile-sort-order*)))
     (> (or p1 2)
        (or p2 2))))
 
@@ -292,11 +292,11 @@
       (setf *player-stuck* nil))
     ; Clear buffer
     (sdl2:render-clear rend)
-    ;Redraw game objects
-    (setf *temp-debug* (copy-list *game-objects*))
-    (setf *game-objects* (sort *game-objects* #'gobj-sort-order))
-    (dolist (o *game-objects*)
-      (render-game-object rend o))
+    ;Redraw game tiles
+    (setf *temp-debug* (copy-list *game-tiles*))
+    (setf *game-tiles* (sort *game-tiles* #'gobj-sort-order))
+    (dolist (o *game-tiles*)
+      (render-game-tile rend o))
     ;Draw current game info
     (draw-text rend
                (format nil "LIVES: ~A  SCORE: ~A  CATS LEFT: ~A  ~A"
@@ -309,7 +309,7 @@
                *font*
                0 0
                255 255 255 255)
-    ;Border between game info and game objects
+    ;Border between game info and game tiles
     ; TODO
     ;Perform status-specific updates
     (case *game-state*
@@ -327,10 +327,10 @@
                    255 255 255 255)))
     (sdl2:render-present rend)))
 
-(defmethod catp ((o game-object))
+(defmethod catp ((o game-tile))
   (eq (gobj-type o) :cat))
 
-(defmethod playerp ((o game-object))
+(defmethod playerp ((o game-tile))
   (eq (gobj-type o) :player))
 
 (defun movablep (o)
@@ -341,38 +341,38 @@
 
 
 (defun steppablep (x y +x +y)
-  "Return t if the movable objects at x,y can step on +x,+y, i.e., move without pushing
-   Also returns t if no objects at x,y at all.
+  "Return t if the movable tiles at x,y can step on +x,+y, i.e., move without pushing
+   Also returns t if no tiles at x,y at all.
    Return nil if +x,+y is out of bounds or equals x,y"
   (if (and (in-bounds-p (+ x +x) (+ y +y))
            (or (not (= +x 0)) ; not +0,+0
                (not (= +y 0))))
-      (dolist (o1 (game-objects-at x y) t)
-        (dolist (o2 (game-objects-at (+ x +x) (+ y +y)))
+      (dolist (o1 (game-tiles-at x y) t)
+        (dolist (o2 (game-tiles-at (+ x +x) (+ y +y)))
           (let ((t1 (gobj-type o1))
                 (t2 (gobj-type o2)))
             (unless (find t2 (getf *steppable-types* t1 nil))
               (return-from steppablep nil)))))
       nil))
 
-(defun step-objects-at (x y +x +y)
+(defun step-tiles-at (x y +x +y)
   "Attempt to move, without pushing, from x,y in direction +x,+y.
    Return t if move succeeded, or nil otherwise."
   (when (and (steppablep x y +x +y)
              (<= (abs +x) 1) (<= (abs +y) 1)) ; only allow one-move steps
-        (dolist (o (game-objects-at x y) t)
+        (dolist (o (game-tiles-at x y) t)
           (when (movablep o)
             (move-relative o +x +y)))))
 
-(defun push-object-at (x y +x +y)
-  "Push the object at x,y in direction +x,+y if possible.
+(defun push-tile-at (x y +x +y)
+  "Push the tile at x,y in direction +x,+y if possible.
    Return T if successful or if (x,y) is empty."
-  (let ((o (game-objects-at x y))
+  (let ((o (game-tiles-at x y))
         (xp (+ x +x))
         (yp (+ y +y)))
     ; If x,y is empty, nothing to do - push succeeds de facto.
-    (unless o (return-from push-object-at t))
-    ; If any object here is not pushable and not steppable then fail.
+    (unless o (return-from push-tile-at t))
+    ; If any tile here is not pushable and not steppable then fail.
     (when (find-if-not (lambda (o)
                          (or (pushablep o)
                              (steppablep (gobj-x o)
@@ -380,25 +380,25 @@
                                          +x
                                          +y)))
                        o)
-      (return-from push-object-at nil))
+      (return-from push-tile-at nil))
     ; If x,y->+x,+y is steppable, then step.
     (when (steppablep x y +x +y)
-      (step-objects-at x y +x +y)
-      (return-from push-object-at t))
+      (step-tiles-at x y +x +y)
+      (return-from push-tile-at t))
     ; If target coordinates are illegal, push fails.
     (unless (and (jmutil:clampedp xp 0 (1- *game-size*))
                  (jmutil:clampedp yp 0 (1- *game-size*)))
-      (return-from push-object-at nil))
+      (return-from push-tile-at nil))
     ; In case of a cat, if target coordinates are not steppable, fail to push.
     ; This allows a cat to be pushed, but not to push anything else.
-    (when (find :cat (game-objects-at x y) :key #'gobj-type)
+    (when (find :cat (game-tiles-at x y) :key #'gobj-type)
         (unless (steppablep x y xp yp)
-          (return-from push-object-at nil)))
-    ; Attempt to push next object which might be in the way.
-    (unless (push-object-at xp yp +x +y)
-      (return-from push-object-at nil))
-    ; Move all movable objects to the new location
-    (step-objects-at x y +x +y)
+          (return-from push-tile-at nil)))
+    ; Attempt to push next tile which might be in the way.
+    (unless (push-tile-at xp yp +x +y)
+      (return-from push-tile-at nil))
+    ; Move all movable tiles to the new location
+    (step-tiles-at x y +x +y)
     #|
     (dolist (ob o)
       (when (movablep ob)
@@ -440,7 +440,7 @@
     (return-from event-mvplayer))
   (let ((+x (first datum))
         (+y (second datum)))
-    (push-object-at (gobj-x *player*)
+    (push-tile-at (gobj-x *player*)
                     (gobj-y *player*)
                     +x
                     +y)))
@@ -490,10 +490,10 @@
 
 
 (defun steppable-directions (x y)
-  "Return a list of directions '(x y) that the objects at x y can step.
-   Nil if there are no objects at x,y or if there is no direction in which
+  "Return a list of directions '(x y) that the tiles at x y can step.
+   Nil if there are no tiles at x,y or if there is no direction in which
    they can step."
-  (let ((objs (game-objects-at x y))
+  (let ((objs (game-tiles-at x y))
         (dirs nil))
     (unless objs (return-from steppable-directions nil))
     (dolist (+x '(-1 0 1) dirs)
@@ -504,8 +504,8 @@
 (defun random-cat ()
   (loop for x = (random *game-size*) then (random *game-size*)
         for y = (random *game-size*) then (random *game-size*)
-        until (null (game-objects-at x y))
-        finally (push (make-game-object :cat x y) *game-objects*)))
+        until (null (game-tiles-at x y))
+        finally (push (make-game-tile :cat x y) *game-tiles*)))
 
 (defun load-level (game-data)
   (bordeaux-threads:with-lock-held (*idle-lock*)
@@ -514,9 +514,9 @@
           (num-cats  (getf game-data :num-cats))
           (bonus-lives (getf game-data :bonus-lives))
           (cat-spawn-delay (getf game-data :cat-spawn-delay)))
-      (free-game-objects)
+      (free-game-tiles)
       (setf *loaded* :in-progress
-            *game-objects* nil
+            *game-tiles* nil
             *player* nil
             *game-size* game-size
             *remaining-cats* (or num-cats 0)
@@ -529,17 +529,17 @@
             do (let ((x (mod i game-size))
                      (y (truncate i game-size))
                      (k (alexandria:make-keyword e)))
-                 (unless (eql k :*) ; Asterisks denote blank space, no objects.
+                 (unless (eql k :*) ; Asterisks denote blank space, no tiles.
                    (case (alexandria:make-keyword e)
-                     (:b (push (make-game-object :box x y) *game-objects*))
-                     (:c (push (make-game-object :cat x y) *game-objects*))
-                     (:x (push (make-game-object :brick x y) *game-objects*))
-                     (:m (setf *player* (make-game-object :player x y))
-                         (push *player* *game-objects*))
-                     (:player (setf *player* (make-game-object :player x y)) ; synonym
-                              (push *player* *game-objects*))
-                     ; Default case - assume a valid game object was named.
-                     (t (push (make-game-object (alexandria:make-keyword e) x y) *game-objects*))))))
+                     (:b (push (make-game-tile :box x y) *game-tiles*))
+                     (:c (push (make-game-tile :cat x y) *game-tiles*))
+                     (:x (push (make-game-tile :brick x y) *game-tiles*))
+                     (:m (setf *player* (make-game-tile :player x y))
+                         (push *player* *game-tiles*))
+                     (:player (setf *player* (make-game-tile :player x y)) ; synonym
+                              (push *player* *game-tiles*))
+                     ; Default case - assume a valid game tile was named.
+                     (t (push (make-game-tile (alexandria:make-keyword e) x y) *game-tiles*))))))
       (setf *loaded* t))))
 
 (defun spawn-cats ()
@@ -571,8 +571,8 @@
 
 
 (defun update-cats ()
-  "Check the status of cat objects, moving them if possible or turning them to cheese if not."
-  (let ((cats (remove-if-not #'catp *game-objects*))
+  "Check the status of cat tiles, moving them if possible or turning them to cheese if not."
+  (let ((cats (remove-if-not #'catp *game-tiles*))
         (stuck-cats 0))
     (dolist (c cats)
       (let* ((cx (gobj-x c))
@@ -581,7 +581,7 @@
              (+x (first dir))
              (+y (second dir)))
         (if dir
-            (step-objects-at cx cy +x +y) ; move in 'best' direction
+            (step-tiles-at cx cy +x +y) ; move in 'best' direction
             (incf stuck-cats))))         ; mark cat as stuck
     ; Check if all cats are stuck (level win condition)
     (when (or (null cats)
@@ -623,9 +623,9 @@
       ; Default minimum data that satisfies assumptions later in code.
       ; Not playable data. Just a mouse you can move around.
       (unless *loaded*
-        (when *game-objects* (free-game-objects))
-        (setf *player* (make-game-object :player 0 0))
-        (push *player* *game-objects*))
+        (when *game-tiles* (free-game-tiles))
+        (setf *player* (make-game-tile :player 0 0))
+        (push *player* *game-tiles*))
 
       ; Event loop
       (sdl2:with-event-loop (:method :poll)
@@ -646,17 +646,17 @@
 
 (defun play-level (level-data)
   "Plays a level defined by level-data"
-  (free-game-objects)
+  (free-game-tiles)
   (load-level level-data)
   (run-game))
 
 
 
 
-(defun edit-level (size &key (game-objects nil) (lives nil) (cats 0) (cat-spawn-delay nil))
-  "A basic level editor; click to cycle through object types in each grid square."
-  (free-game-objects)
-  (setf *game-objects* game-objects)
+(defun edit-level (size &key (game-tiles nil) (lives nil) (cats 0) (cat-spawn-delay nil))
+  "A basic level editor; click to cycle through tile types in each grid square."
+  (free-game-tiles)
+  (setf *game-tiles* game-tiles)
   (setf *game-size* size)
   (let ((result nil))
     (sdl2-util:with-initialized-sdl (:title "Mouse Game" :h (+ *banner-size* *window-size*) :w *window-size*)
@@ -678,12 +678,12 @@
                                                        (* y (truncate *window-size* size)))
                                                     (truncate *window-size* size)
                                                     (truncate *window-size* size)))))
-         ; Render game objects on a blank canvas
-         (dolist (obj *game-objects*)
-           (render-game-object rend obj))
+         ; Render game tiles on a blank canvas
+         (dolist (obj *game-tiles*)
+           (render-game-tile rend obj))
          (sdl2:render-present rend))
         (:quit ()
-          (setf result *game-objects*)
+          (setf result *game-tiles*)
           t)
         #|(:keyup (:keysym keysym)
                   t) |#
@@ -691,9 +691,9 @@
          (let* ((x (truncate xpx (truncate *window-size* size)))
                 (y (truncate (- ypx *banner-size*)
                              (truncate *window-size* size)))
-                (existing-objects (game-objects-at x y))
-                (obj (first existing-objects)))
-           (if existing-objects
+                (existing-tiles (game-tiles-at x y))
+                (obj (first existing-tiles)))
+           (if existing-tiles
                (setf (gobj-type obj)
                      (case (gobj-type obj)
                        (:nothing :box)
@@ -702,16 +702,16 @@
                        (:player :brick)
                        (:brick  :hole)
                        (t :nothing)))
-               (push (make-game-object :box x y) *game-objects*))))))
-    (setf *game-objects*
-          (remove-if (curry #'eql :nothing) *game-objects* :key #'gobj-type))
+               (push (make-game-tile :box x y) *game-tiles*))))))
+    (setf *game-tiles*
+          (remove-if (curry #'eql :nothing) *game-tiles* :key #'gobj-type))
     ; Convert resultant data into level set suitable for #'load-level
     `(:game-size ,size
       :num-cats ,cats
       :bonus-lives ,lives
       :contents ,(loop for y from 0 to (1- size)
                        appending (loop for x from 0 to (1- size)
-                                       collect (let ((obj (first (game-objects-at x y))))
+                                       collect (let ((obj (first (game-tiles-at x y))))
                                                  (if obj
                                                      (gobj-type obj)
                                                      '*)))))))
@@ -723,7 +723,7 @@
   (event-startgame))
 
 (defun play-levelset (levelset)
-  (free-game-objects)
+  (free-game-tiles)
   (load-level (first levelset))
   (setf *levels* (rest levelset))
   (run-game)
