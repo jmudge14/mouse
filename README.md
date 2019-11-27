@@ -20,3 +20,4 @@ cheese.png -- https://openclipart.org/detail/216862/cheese
 cat-stuck.png -- https://openclipart.org/detail/26971/architetto-gatto-03
 brick.png -- https://openclipart.org/detail/202301/red-brick-wall
 hole.png -- https://openclipart.org/detail/201757/mysterious-swirling-vortex
+yarn.png -- https://openclipart.org/detail/251106/yarn-ball
