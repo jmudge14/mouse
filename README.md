@@ -1,5 +1,5 @@
 # mouse
-### _Jack Mudge <jakykong@theanythingbox.com_
+### _Jack Mudge <jmudge14@gmail.com>_
 
 Mouse Game - Sort-of clone of Rodent's Revenge
 
@@ -7,7 +7,7 @@ Mouse Game - Sort-of clone of Rodent's Revenge
 
 Copyright (c) 2018 Jack Mudge 
 This game and all source code is released under terms of the Gnu General Public License v3 or greater, except:
-All image files are released to the public domain.
+All image files are or were released to the public domain, see Credits.
 
 ## Credits
 
